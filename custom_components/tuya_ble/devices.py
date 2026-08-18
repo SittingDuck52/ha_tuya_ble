@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import logging
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_ADDRESS, CONF_DEVICE_ID
 
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
@@ -106,6 +107,10 @@ class TuyaBLECoordinator(DataUpdateCoordinator[None]):
 
     @property
     def connected(self) -> bool:
+        if not self._device.keep_connection:
+            # On-demand mode: available once the device has been reached at
+            # least once; a failing command surfaces as an error instead.
+            return self._device.last_connected_at is not None
         return not self._disconnected
 
     @callback
@@ -159,6 +164,9 @@ class TuyaBLEData:
     product: TuyaBLEProductInfo
     manager: HASSTuyaBLEDeviceManager
     coordinator: TuyaBLECoordinator
+
+
+TuyaBLEConfigEntry = ConfigEntry[TuyaBLEData]
 
 
 @dataclass

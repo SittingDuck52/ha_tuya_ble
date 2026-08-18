@@ -16,8 +16,19 @@ from homeassistant.exceptions import ConfigEntryNotReady
 from .tuya_ble import TuyaBLEDevice
 
 from .cloud import HASSTuyaBLEDeviceManager
-from .const import DOMAIN
-from .devices import TuyaBLECoordinator, TuyaBLEData, get_device_product_info
+from .const import (
+    CONF_IDLE_DISCONNECT_DELAY,
+    CONF_KEEP_CONNECTION,
+    DEFAULT_IDLE_DISCONNECT_DELAY,
+    DEFAULT_KEEP_CONNECTION,
+    DOMAIN,
+)
+from .devices import (
+    TuyaBLEConfigEntry,
+    TuyaBLECoordinator,
+    TuyaBLEData,
+    get_device_product_info,
+)
 
 PLATFORMS: list[Platform] = [
     Platform.BUTTON,
@@ -33,7 +44,7 @@ PLATFORMS: list[Platform] = [
 _LOGGER = logging.getLogger(__name__)
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_setup_entry(hass: HomeAssistant, entry: TuyaBLEConfigEntry) -> bool:
     """Set up Tuya BLE from a config entry."""
     address: str = entry.data[CONF_ADDRESS]
     ble_device = bluetooth.async_ble_device_from_address(
@@ -44,7 +55,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             f"Could not find Tuya BLE device with address {address}"
         )
     manager = HASSTuyaBLEDeviceManager(hass, entry.options.copy())
-    device = TuyaBLEDevice(manager, ble_device)
+    device = TuyaBLEDevice(
+        manager,
+        ble_device,
+        keep_connection=entry.options.get(CONF_KEEP_CONNECTION, DEFAULT_KEEP_CONNECTION),
+        idle_disconnect_delay=entry.options.get(
+            CONF_IDLE_DISCONNECT_DELAY, DEFAULT_IDLE_DISCONNECT_DELAY
+        ),
+    )
     await device.initialize()
     product_info = get_device_product_info(device)
 
@@ -79,7 +97,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
     )
 
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = TuyaBLEData(
+    entry.runtime_data = TuyaBLEData(
         entry.title,
         device,
         product_info,
@@ -100,17 +118,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     return True
 
 
-async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Handle options update."""
-    data: TuyaBLEData = hass.data[DOMAIN][entry.entry_id]
-    if entry.title != data.title:
-        await hass.config_entries.async_reload(entry.entry_id)
+async def _async_update_listener(hass: HomeAssistant, entry: TuyaBLEConfigEntry) -> None:
+    """Handle options update: credentials or connection policy changed."""
+    await hass.config_entries.async_reload(entry.entry_id)
 
 
-async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_unload_entry(hass: HomeAssistant, entry: TuyaBLEConfigEntry) -> bool:
     """Unload a config entry."""
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-    data: TuyaBLEData | None = hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
+    data: TuyaBLEData | None = getattr(entry, "runtime_data", None)
     if data:
         try:
             await asyncio.wait_for(data.device.stop(), 15)
